@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FCM Notification Web App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js"></script>
+  </head>
+  <body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white p-8 rounded-xl shadow-lg max-w-md w-full">
+      <h1 class="text-2xl font-bold text-center mb-6 text-blue-600">
+        ระบบแจ้งเตือน FCM
+      </h1>
+
+      <div id="status-loading" class="text-center py-4">
+        <p class="text-gray-500 animate-pulse">กำลังตรวจสอบสถานะ...</p>
+      </div>
+
+      <div id="permission-section" class="hidden mb-6">
+        <p class="text-gray-600 mb-4 text-center">
+          กรุณากดปุ่มเพื่อขออนุญาตรับการแจ้งเตือนและรับโทเคน
+        </p>
+        <button
+          id="btn-permission"
+          class="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 rounded-lg transition"
+        >
+          อนุญาตการแจ้งเตือน
+        </button>
+      </div>
+
+      <div id="token-section" class="hidden space-y-4">
+        <div class="p-3 bg-green-50 border border-green-200 rounded-lg">
+          <p class="text-sm font-medium text-green-800">ได้รับโทเคนสำเร็จ!</p>
+          <p class="text-xs text-green-600">
+            คัดลอกโทเคนด้านล่างเพื่อใช้ในการส่งข้อความทดสอบ
+          </p>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1"
+            >Device Token (FCM Token):</label
+          >
+          <textarea
+            id="token-display"
+            readonly
+            class="w-full p-2 text-xs border rounded-md bg-gray-50 h-24 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="กำลังโหลดโทเคน..."
+          ></textarea>
+          <div class="flex justify-between items-center mt-2">
+            <button
+              id="btn-copy"
+              class="text-sm text-blue-600 font-medium hover:text-blue-800 flex items-center"
+            >
+              <svg
+                class="w-4 h-4 mr-1"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
+                ></path>
+              </svg>
+              คัดลอก Token
+            </button>
+            <button
+              id="btn-refresh"
+              class="text-sm text-gray-500 hover:text-gray-700"
+            >
+              รีเฟรช
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="message-container" class="mt-8 hidden">
+        <h2 class="text-lg font-semibold mb-3 border-b pb-2">
+          ข้อความที่ได้รับล่าสุด:
+        </h2>
+        <div id="messages" class="space-y-3">
+          <!-- ข้อความจะปรากฏที่นี่ -->
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // --- 1. การตั้งค่า Firebase ---
+      const firebaseConfig = {
+        apiKey: "AIzaSyAKjPsp_i6q1Ml0jT-vRCw6iB7F6Jr5618",
+        authDomain: "pun045.firebaseapp.com",
+        projectId: "pun045",
+        storageBucket: "pun045.firebasestorage.app",
+        messagingSenderId: "582706924726",
+        appId: "1:582706924726:web:85b1181040bfcf4c656a17",
+      };
+
+      const VAPID_KEY =
+        "BNT3H5x9exE0nHd1ULAZ7Li8gNE2v4lZ93FCnfBJob_P5bHlKqF-7BpKFkLxrqSJbGNF4dULMzwfSVnAwjuL6lc";
+
+      // เริ่มต้น Firebase
+      if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
+        firebase.initializeApp(firebaseConfig);
+        const messaging = firebase.messaging();
+        initApp(messaging);
+      } else {
+        document.getElementById("status-loading").innerHTML =
+          '<p class="text-red-500 font-medium">กรุณาตั้งค่า Firebase Config ในโค้ดก่อนใช้งาน</p>';
+      }
+
+      function initApp(messaging) {
+        const statusLoading = document.getElementById("status-loading");
+        const btnPermission = document.getElementById("btn-permission");
+        const permissionSection = document.getElementById("permission-section");
+        const tokenSection = document.getElementById("token-section");
+        const tokenDisplay = document.getElementById("token-display");
+        const messageContainer = document.getElementById("message-container");
+        const messagesDiv = document.getElementById("messages");
+
+        // --- 2. การจัดการ Service Worker ---
+        if ("serviceWorker" in navigator) {
+          // ลงทะเบียน Service Worker โดยไม่ต้องใช้ useServiceWorker()
+          navigator.serviceWorker
+            .register("/firebase-messaging-sw.js", { scope: "/" })
+            .then((registration) => {
+              console.log(
+                "Service Worker Registered with scope:",
+                registration.scope,
+              );
+              // ตรวจสอบสถานะการลงทะเบียนเสร็จสิ้น
+              return navigator.serviceWorker.ready;
+            })
+            .then(() => {
+              checkCurrentPermission();
+            })
+            .catch((err) => {
+              console.error("Service Worker Registration Failed:", err);
+              statusLoading.innerHTML =
+                '<p class="text-red-500 text-xs text-center">SW Registration Failed: ' +
+                err.message +
+                "</p>";
+              checkCurrentPermission();
+            });
+        }
+
+        function checkCurrentPermission() {
+          statusLoading.classList.add("hidden");
+          if (Notification.permission === "granted") {
+            getToken();
+          } else if (Notification.permission === "default") {
+            permissionSection.classList.remove("hidden");
+          } else {
+            statusLoading.innerHTML =
+              '<p class="text-red-500 text-sm">คุณได้ปิดกั้นการแจ้งเตือน กรุณาเปิดสิทธิ์ในตั้งค่าเบราว์เซอร์</p>';
+            statusLoading.classList.remove("hidden");
+          }
+        }
+
+        btnPermission.addEventListener("click", async () => {
+          try {
+            const permission = await Notification.requestPermission();
+            if (permission === "granted") {
+              permissionSection.classList.add("hidden");
+              getToken();
+            } else {
+              alert("คุณจำเป็นต้องอนุญาตการแจ้งเตือนเพื่อรับโทเคน");
+            }
+          } catch (err) {
+            console.error("Permission Request Failed:", err);
+          }
+        });
+
+        function getToken() {
+          if (VAPID_KEY === "YOUR_PUBLIC_VAPID_KEY") {
+            tokenSection.classList.remove("hidden");
+            tokenDisplay.value = "กรุณาใส่ VAPID_KEY ในโค้ด (บรรทัดที่ 71)";
+            return;
+          }
+
+          // ดึงโทเคนโดยระบุ vapidKey (SDK จะหา Service Worker ที่ชื่อ firebase-messaging-sw.js ให้เองอัตโนมัติ)
+          messaging
+            .getToken({ vapidKey: VAPID_KEY })
+            .then((currentToken) => {
+              if (currentToken) {
+                tokenDisplay.value = currentToken;
+                tokenSection.classList.remove("hidden");
+                permissionSection.classList.add("hidden");
+                console.log("FCM Token received successfully");
+              } else {
+                console.warn(
+                  "No registration token available. Request permission to generate one.",
+                );
+              }
+            })
+            .catch((err) => {
+              console.error("Token Retrieval Error:", err);
+              tokenDisplay.value = "Token Error: " + err.message;
+              tokenSection.classList.remove("hidden");
+            });
+        }
+
+        messaging.onMessage((payload) => {
+          console.log("Message received. ", payload);
+          messageContainer.classList.remove("hidden");
+          const msgEl = document.createElement("div");
+          msgEl.className =
+            "p-3 bg-blue-50 border-l-4 border-blue-500 rounded text-sm shadow-sm";
+          msgEl.innerHTML = `
+                    <div class="font-bold text-blue-800">${payload.notification.title}</div>
+                    <div class="text-gray-700 mt-1">${payload.notification.body}</div>
+                    <div class="text-[10px] text-gray-400 mt-2 text-right">${new Date().toLocaleTimeString()}</div>
+                `;
+          messagesDiv.prepend(msgEl);
+        });
+
+        document.getElementById("btn-copy").addEventListener("click", () => {
+          tokenDisplay.select();
+          document.execCommand("copy");
+          alert("คัดลอกโทเคนแล้ว!");
+        });
+
+        document.getElementById("btn-refresh").addEventListener("click", () => {
+          tokenDisplay.value = "กำลังโหลดโทเคนใหม่...";
+          getToken();
+        });
+      }
+    </script>
+  </body>
+</html>
